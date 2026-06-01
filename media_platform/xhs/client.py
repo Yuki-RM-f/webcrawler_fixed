@@ -35,7 +35,7 @@ from tools import utils
 if TYPE_CHECKING:
     from proxy.proxy_ip_pool import ProxyIpPool
 
-from .exception import DataFetchError, IPBlockError, NoteNotFoundError
+from .exception import DataFetchError, IPBlockError, NoteNotFoundError, XHSVerificationError
 from .field import SearchNoteType, SearchSortType
 from .help import get_search_id
 from .extractor import XiaoHongShuExtractor
@@ -112,7 +112,11 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         self.headers.update(headers)
         return self.headers
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1), retry=retry_if_not_exception_type(NoteNotFoundError))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(1),
+        retry=retry_if_not_exception_type((NoteNotFoundError, XHSVerificationError)),
+    )
     async def request(self, method, url, **kwargs) -> Union[str, Any]:
         """
         Wrapper for httpx common request method, processes request response
@@ -124,21 +128,36 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         Returns:
 
         """
-        # Check if proxy is expired before each request
-        await self._refresh_proxy_if_expired()
-
         # return response.text
         return_response = kwargs.pop("return_response", False)
-        async with make_async_client(proxy=self.proxy) as client:
-            response = await client.request(method, url, timeout=self.timeout, **kwargs)
+        verify_pause_seconds = max(0, int(getattr(config, "XHS_VERIFY_PAUSE_SECONDS", 300)))
+        verify_max_retries = max(0, int(getattr(config, "XHS_VERIFY_MAX_RETRIES", 3)))
 
-        if response.status_code == 471 or response.status_code == 461:
-            # someday someone maybe will bypass captcha
-            verify_type = response.headers["Verifytype"]
-            verify_uuid = response.headers["Verifyuuid"]
-            msg = f"CAPTCHA appeared, request failed, Verifytype: {verify_type}, Verifyuuid: {verify_uuid}, Response: {response}"
-            utils.logger.error(msg)
-            raise Exception(msg)
+        for verify_retry in range(verify_max_retries + 1):
+            # Check if proxy is expired before each request, including risk-control retries.
+            await self._refresh_proxy_if_expired()
+
+            async with make_async_client(proxy=self.proxy) as client:
+                response = await client.request(method, url, timeout=self.timeout, **kwargs)
+
+            if response.status_code not in (471, 461):
+                break
+
+            verify_type = response.headers.get("Verifytype", "<missing>")
+            verify_uuid = response.headers.get("Verifyuuid", "<missing>")
+            msg = (
+                f"XHS verification/risk response, status: {response.status_code}, "
+                f"Verifytype: {verify_type}, Verifyuuid: {verify_uuid}, "
+                f"attempt: {verify_retry + 1}/{verify_max_retries + 1}, url: {url}"
+            )
+            if verify_retry >= verify_max_retries:
+                utils.logger.error(f"{msg}. Max verification retries reached; pausing did not clear risk control.")
+                raise XHSVerificationError(msg)
+
+            utils.logger.warning(
+                f"{msg}. Pausing for {verify_pause_seconds} seconds before retrying the same request."
+            )
+            await asyncio.sleep(verify_pause_seconds)
 
         if return_response:
             return response.text
@@ -253,6 +272,8 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
             self_info: Dict = await self.query_self()
             if self_info and self_info.get("data", {}).get("result", {}).get("success"):
                 ping_flag = True
+        except XHSVerificationError:
+            raise
         except Exception as e:
             utils.logger.error(
                 f"[XiaoHongShuClient.pong] Check login state failed: {e}, and try to login again..."
@@ -519,6 +540,8 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                             await callback(note_id, comments)
                         await asyncio.sleep(crawl_interval)
                         result.extend(comments)
+                    except XHSVerificationError:
+                        raise
                     except DataFetchError as e:
                         utils.logger.warning(
                             f"[XiaoHongShuClient.get_comments_all_sub_comments] Failed to get sub-comments for note_id: {note_id}, root_comment_id: {root_comment_id}, error: {e}. Skipping this comment's sub-comments."
@@ -529,6 +552,8 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                             f"[XiaoHongShuClient.get_comments_all_sub_comments] Unexpected error when getting sub-comments for note_id: {note_id}, root_comment_id: {root_comment_id}, error: {e}"
                         )
                         break
+            except XHSVerificationError:
+                raise
             except Exception as e:
                 utils.logger.error(
                     f"[XiaoHongShuClient.get_comments_all_sub_comments] Error processing comment: {comment.get('id', 'unknown')}, error: {e}. Continuing with next comment."

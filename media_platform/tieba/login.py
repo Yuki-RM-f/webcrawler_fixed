@@ -83,6 +83,7 @@ class BaiduTieBaLogin(AbstractLogin):
         """login baidutieba website and keep webdriver login state"""
         utils.logger.info("[BaiduTieBaLogin.login_by_qrcode] Begin login baidutieba by qrcode ...")
         qrcode_img_selector = "xpath=//img[@class='tang-pass-qrcode-img']"
+        passport_login_url = "https://passport.baidu.com/v2/?login&tpl=tb&u=https%3A%2F%2Ftieba.baidu.com%2F"
         # find login qrcode
         base64_qrcode_img = await utils.find_login_qrcode(
             self.context_page,
@@ -90,10 +91,7 @@ class BaiduTieBaLogin(AbstractLogin):
         )
         if not base64_qrcode_img:
             utils.logger.info("[BaiduTieBaLogin.login_by_qrcode] login failed , have not found qrcode please check ....")
-            # if this website does not automatically popup login dialog box, we will manual click login button
-            await asyncio.sleep(0.5)
-            login_button_ele = self.context_page.locator("xpath=//li[@class='u_login']")
-            await login_button_ele.click()
+            await self.context_page.goto(passport_login_url, wait_until="domcontentloaded")
             base64_qrcode_img = await utils.find_login_qrcode(
                 self.context_page,
                 selector=qrcode_img_selector

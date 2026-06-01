@@ -17,14 +17,16 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
+import os
+
 # Basic configuration
-PLATFORM = "xhs"  # Platform, xhs | dy | ks | bili | wb | tieba | zhihu
+PLATFORM = "xhs"  # Platform, xhs | x | dy | ks | bili | wb | tieba | zhihu | goofish
 
 # 是否使用海外版小红书 (rednote.com)
 # 开启后 API 走 webapi.rednote.com，cookie 域使用 .rednote.com
 XHS_INTERNATIONAL = False
 
-KEYWORDS = "编程副业,编程兼职"  # Keyword search configuration, separated by English commas
+KEYWORDS = "抖音 刷赞,抖音 自动化,抖音 兼职"  # Keyword search configuration, separated by English commas
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 CRAWLER_TYPE = (
@@ -69,14 +71,14 @@ CUSTOM_BROWSER_PATH = ""
 CDP_HEADLESS = False
 
 # 浏览器启动超时时间（秒）
-BROWSER_LAUNCH_TIMEOUT = 60
+BROWSER_LAUNCH_TIMEOUT = 180
 
 # 是否连接用户已打开的浏览器，而不是启动新的浏览器
 # 开启后，程序会连接一个已经启用了远程调试的浏览器
 # 用户需要在 Chrome 中开启远程调试：chrome://inspect/#remote-debugging
 # 或者使用命令行参数启动 Chrome：--remote-debugging-port=9222
 # 这种方式反检测效果最好，因为直接使用用户真实浏览器的所有 Cookie、扩展和浏览历史
-CDP_CONNECT_EXISTING = True
+CDP_CONNECT_EXISTING = False
 
 # 程序结束时是否自动关闭浏览器
 # 设置为 False 可以保持浏览器运行，方便调试
@@ -95,7 +97,7 @@ USER_DATA_DIR = "%s_user_data_dir"  # %s will be replaced by platform name
 START_PAGE = 1
 
 # Control the number of crawled videos/posts
-CRAWLER_MAX_NOTES_COUNT = 15
+CRAWLER_MAX_NOTES_COUNT = 100
 
 # Controlling the number of concurrent crawlers
 MAX_CONCURRENCY_NUM = 1
@@ -107,7 +109,7 @@ ENABLE_GET_MEIDAS = False
 ENABLE_GET_COMMENTS = True
 
 # Control the number of crawled first-level comments (single video/post)
-CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = 10
+CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = 100
 
 # Whether to enable the mode of crawling second-level comments. By default, crawling of second-level comments is not enabled.
 # If the old version of the project uses db, you need to refer to schema/tables.sql line 287 to add table fields.
@@ -132,6 +134,11 @@ FONT_PATH = "./docs/STZHONGS.TTF"
 # Crawl interval
 CRAWLER_MAX_SLEEP_SEC = 2
 
+# Xiaohongshu verification/risk control pause.
+# When a request hits verification, pause at the current request and retry it.
+XHS_VERIFY_PAUSE_SECONDS = 300
+XHS_VERIFY_MAX_RETRIES = 3
+
 # 是否禁用 SSL 证书验证。仅在使用企业代理、Burp Suite、mitmproxy 等会注入自签名证书的中间人代理时设为 True。
 # 警告：禁用 SSL 验证将使所有流量暴露于中间人攻击风险，请勿在生产环境中开启。
 DISABLE_SSL_VERIFY = False
@@ -143,3 +150,5 @@ from .ks_config import *
 from .weibo_config import *
 from .tieba_config import *
 from .zhihu_config import *
+from .x_config import *
+from .goofish_config import *

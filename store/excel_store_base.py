@@ -45,6 +45,7 @@ except ImportError:
     EXCEL_AVAILABLE = False
 
 from base.base_crawler import AbstractStore
+from tools.store_dedupe import dedupe_records_by_key, get_dedupe_key_field_from_headers
 from tools import utils
 import config
 
@@ -234,6 +235,31 @@ class ExcelStoreBase(AbstractStore):
                 bottom=Side(style='thin')
             )
 
+    def _dedupe_sheet(self, sheet, item_type: str):
+        if sheet.max_row <= 1:
+            return
+
+        headers = [cell.value for cell in sheet[1]]
+        key_field = get_dedupe_key_field_from_headers(self.platform, item_type, headers)
+        if not key_field:
+            return
+
+        records = []
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            records.append({
+                header: row[index] if index < len(row) else ""
+                for index, header in enumerate(headers)
+                if header
+            })
+
+        deduped_records = dedupe_records_by_key(records, key_field)
+        if len(deduped_records) == len(records):
+            return
+
+        sheet.delete_rows(2, sheet.max_row - 1)
+        for record in deduped_records:
+            self._write_row(sheet, record, headers)
+
     async def store_content(self, content_item: Dict):
         """
         Store content data to Excel
@@ -349,6 +375,9 @@ class ExcelStoreBase(AbstractStore):
         Save workbook to file
         """
         try:
+            self._dedupe_sheet(self.contents_sheet, "contents")
+            self._dedupe_sheet(self.comments_sheet, "comments")
+
             # Auto-adjust column widths for all sheets
             self._auto_adjust_column_width(self.contents_sheet)
             self._auto_adjust_column_width(self.comments_sheet)

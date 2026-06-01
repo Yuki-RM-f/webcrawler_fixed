@@ -58,6 +58,11 @@ def calculate_number_of_files(file_store_path: str) -> int:
         return 1
 
 
+def _filter_model_columns(model, item: Dict) -> Dict:
+    columns = {column.name for column in model.__table__.columns}
+    return {key: value for key, value in item.items() if key in columns}
+
+
 class TieBaCsvStoreImplement(AbstractStore):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -105,6 +110,7 @@ class TieBaDbStoreImplement(AbstractStore):
             content_item: content item dict
         """
         note_id = content_item.get("note_id")
+        content_item = _filter_model_columns(TiebaNote, content_item)
         async with get_session() as session:
             stmt = select(TiebaNote).where(TiebaNote.note_id == note_id)
             res = await session.execute(stmt)
@@ -124,6 +130,7 @@ class TieBaDbStoreImplement(AbstractStore):
             comment_item: comment item dict
         """
         comment_id = comment_item.get("comment_id")
+        comment_item = _filter_model_columns(TiebaComment, comment_item)
         async with get_session() as session:
             stmt = select(TiebaComment).where(TiebaComment.comment_id == comment_id)
             res = await session.execute(stmt)

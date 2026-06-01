@@ -42,7 +42,7 @@ from tools.cdp_browser import CDPBrowserManager
 from var import crawler_type_var, source_keyword_var
 
 from .client import XiaoHongShuClient
-from .exception import DataFetchError, NoteNotFoundError
+from .exception import DataFetchError, NoteNotFoundError, XHSVerificationError
 from .field import SearchSortType
 from .help import parse_note_info_from_note_url, parse_creator_info_from_url, get_search_id
 from .login import XiaoHongShuLogin
@@ -181,6 +181,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     # Sleep after each page navigation
                     await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                except XHSVerificationError:
+                    utils.logger.error("[XiaoHongShuCrawler.search] XHS verification/risk control still active after pause retries, terminate current crawl task")
+                    raise
                 except DataFetchError:
                     utils.logger.error("[XiaoHongShuCrawler.search] Get note detail error")
                     break
@@ -315,6 +318,12 @@ class XiaoHongShuCrawler(AbstractCrawler):
             except NoteNotFoundError as ex:
                 utils.logger.warning(f"[XiaoHongShuCrawler.get_note_detail_async_task] Note not found: {note_id}, {ex}")
                 return None
+            except XHSVerificationError as ex:
+                utils.logger.error(
+                    f"[XiaoHongShuCrawler.get_note_detail_async_task] XHS verification/risk control still active "
+                    f"after pause retries, terminate current crawl task. note_id: {note_id}, error: {ex}"
+                )
+                raise
             except DataFetchError as ex:
                 utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] Get note detail error: {ex}")
                 return None
@@ -329,15 +338,29 @@ class XiaoHongShuCrawler(AbstractCrawler):
             return
 
         utils.logger.info(f"[XiaoHongShuCrawler.batch_get_note_comments] Begin batch get note comments, note list: {note_list}")
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-        task_list: List[Task] = []
-        for index, note_id in enumerate(note_list):
-            task = asyncio.create_task(
-                self.get_comments(note_id=note_id, xsec_token=xsec_tokens[index], semaphore=semaphore),
-                name=note_id,
-            )
-            task_list.append(task)
-        await asyncio.gather(*task_list)
+        max_concurrency = max(1, int(config.MAX_CONCURRENCY_NUM))
+        semaphore = asyncio.Semaphore(max_concurrency)
+        for batch_start in range(0, len(note_list), max_concurrency):
+            task_list: List[Task] = []
+            batch_end = min(batch_start + max_concurrency, len(note_list))
+            for index in range(batch_start, batch_end):
+                note_id = note_list[index]
+                task = asyncio.create_task(
+                    self.get_comments(note_id=note_id, xsec_token=xsec_tokens[index], semaphore=semaphore),
+                    name=note_id,
+                )
+                task_list.append(task)
+
+            done, pending = await asyncio.wait(task_list, return_when=asyncio.FIRST_EXCEPTION)
+            for task in done:
+                exception = task.exception()
+                if exception is None:
+                    continue
+                for pending_task in pending:
+                    pending_task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                raise exception
 
     async def get_comments(self, note_id: str, xsec_token: str, semaphore: asyncio.Semaphore):
         """Get note comments with keyword filtering and quantity limitation"""
@@ -345,13 +368,32 @@ class XiaoHongShuCrawler(AbstractCrawler):
             utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Begin get note id comments {note_id}")
             # Use fixed crawling interval
             crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
-            await self.xhs_client.get_note_all_comments(
-                note_id=note_id,
-                xsec_token=xsec_token,
-                crawl_interval=crawl_interval,
-                callback=xhs_store.batch_update_xhs_note_comments,
-                max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
-            )
+            try:
+                await self.xhs_client.get_note_all_comments(
+                    note_id=note_id,
+                    xsec_token=xsec_token,
+                    crawl_interval=crawl_interval,
+                    callback=xhs_store.batch_update_xhs_note_comments,
+                    max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+                )
+            except XHSVerificationError as ex:
+                utils.logger.error(
+                    f"[XiaoHongShuCrawler.get_comments] XHS verification/risk control still active after pause retries, "
+                    f"terminate current crawl task. note_id: {note_id}, error: {ex}"
+                )
+                raise
+            except DataFetchError as ex:
+                utils.logger.warning(
+                    f"[XiaoHongShuCrawler.get_comments] Failed to fetch comments, skip current note comments and continue. "
+                    f"note_id: {note_id}, error: {ex}"
+                )
+                return
+            except RetryError as ex:
+                utils.logger.warning(
+                    f"[XiaoHongShuCrawler.get_comments] Retry exhausted while fetching comments, skip current note comments and continue. "
+                    f"note_id: {note_id}, error: {ex}"
+                )
+                return
 
             # Sleep after fetching comments
             await asyncio.sleep(crawl_interval)

@@ -186,6 +186,40 @@ class TestExcelStoreBase:
         assert "Creators" not in wb.sheetnames
         wb.close()
 
+    def test_flush_dedupes_content_rows_by_unique_id(self, excel_store):
+        """Test that duplicate content rows are collapsed before saving"""
+        asyncio.run(excel_store.store_content({"note_id": "note1", "title": "Old"}))
+        asyncio.run(excel_store.store_content({"note_id": "", "title": "No Key"}))
+        asyncio.run(excel_store.store_content({"note_id": "note1", "title": "New"}))
+
+        excel_store.flush()
+
+        wb = openpyxl.load_workbook(excel_store.filename)
+        rows = list(wb["Contents"].iter_rows(values_only=True))
+        assert rows == [
+            ("note_id", "title"),
+            (None, "No Key"),
+            ("note1", "New"),
+        ]
+        wb.close()
+
+    def test_flush_dedupes_comment_rows_by_comment_id(self, excel_store):
+        """Test that duplicate comment rows are collapsed before saving"""
+        asyncio.run(excel_store.store_comment({"comment_id": "comment1", "content": "Old"}))
+        asyncio.run(excel_store.store_comment({"comment_id": "comment2", "content": "Middle"}))
+        asyncio.run(excel_store.store_comment({"comment_id": "comment1", "content": "New"}))
+
+        excel_store.flush()
+
+        wb = openpyxl.load_workbook(excel_store.filename)
+        rows = list(wb["Comments"].iter_rows(values_only=True))
+        assert rows == [
+            ("comment_id", "content"),
+            ("comment2", "Middle"),
+            ("comment1", "New"),
+        ]
+        wb.close()
+
 
 @pytest.mark.skipif(not EXCEL_AVAILABLE, reason="openpyxl not installed")
 def test_excel_import_availability():

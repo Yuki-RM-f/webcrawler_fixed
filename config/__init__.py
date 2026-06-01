@@ -18,5 +18,9 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from .base_config import *
 from .db_config import *

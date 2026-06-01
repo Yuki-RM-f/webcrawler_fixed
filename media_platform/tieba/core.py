@@ -157,6 +157,7 @@ class TieBaCrawler(AbstractCrawler):
         tieba_limit_count = 10  # tieba limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < tieba_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = tieba_limit_count
+        target_notes_count = config.CRAWLER_MAX_NOTES_COUNT
         start_page = config.START_PAGE
         for keyword in config.KEYWORDS.split(","):
             source_keyword_var.set(keyword)
@@ -164,9 +165,10 @@ class TieBaCrawler(AbstractCrawler):
                 f"[BaiduTieBaCrawler.search] Current search keyword: {keyword}"
             )
             page = 1
-            while (
-                page - start_page + 1
-            ) * tieba_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
+            seen_note_ids = set()
+            fetched_notes_count = 0
+            duplicate_page_count = 0
+            while fetched_notes_count < target_notes_count:
                 if page < start_page:
                     utils.logger.info(f"[BaiduTieBaCrawler.search] Skip page {page}")
                     page += 1
@@ -189,12 +191,34 @@ class TieBaCrawler(AbstractCrawler):
                             f"[BaiduTieBaCrawler.search] Search note list is empty"
                         )
                         break
+
+                    new_notes: List[TiebaNote] = []
+                    for note_detail in notes_list:
+                        if note_detail.note_id in seen_note_ids:
+                            continue
+                        seen_note_ids.add(note_detail.note_id)
+                        new_notes.append(note_detail)
+                        if fetched_notes_count + len(new_notes) >= target_notes_count:
+                            break
+
                     utils.logger.info(
-                        f"[BaiduTieBaCrawler.search] Note list len: {len(notes_list)}"
+                        f"[BaiduTieBaCrawler.search] Note list len: {len(notes_list)}, "
+                        f"new note len: {len(new_notes)}, total: "
+                        f"{fetched_notes_count + len(new_notes)}/{target_notes_count}"
                     )
-                    await self.get_specified_notes(
-                        note_id_list=[note_detail.note_id for note_detail in notes_list]
-                    )
+                    if not new_notes:
+                        duplicate_page_count += 1
+                        if duplicate_page_count >= 3:
+                            utils.logger.info(
+                                "[BaiduTieBaCrawler.search] Stop search because consecutive pages have no new notes"
+                            )
+                            break
+                    else:
+                        duplicate_page_count = 0
+                        await self.get_specified_notes(
+                            note_id_list=[note_detail.note_id for note_detail in new_notes]
+                        )
+                        fetched_notes_count += len(new_notes)
 
                     # Sleep after page navigation
                     await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)

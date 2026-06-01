@@ -39,8 +39,10 @@ from base.base_crawler import AbstractCrawler
 from media_platform.bilibili import BilibiliCrawler
 from media_platform.douyin import DouYinCrawler
 from media_platform.kuaishou import KuaishouCrawler
+from media_platform.goofish import GoofishCrawler
 from media_platform.tieba import TieBaCrawler
 from media_platform.weibo import WeiboCrawler
+from media_platform.x import XBrowserCrawler
 from media_platform.xhs import XiaoHongShuCrawler
 from media_platform.zhihu import ZhihuCrawler
 from tools.async_file_writer import AsyncFileWriter
@@ -56,6 +58,8 @@ class CrawlerFactory:
         "wb": WeiboCrawler,
         "tieba": TieBaCrawler,
         "zhihu": ZhihuCrawler,
+        "x": XBrowserCrawler,
+        "goofish": GoofishCrawler,
     }
 
     @staticmethod
@@ -81,6 +85,26 @@ def _flush_excel_if_needed() -> None:
         print("[Main] Excel files saved successfully")
     except Exception as e:
         print(f"[Main] Error flushing Excel data: {e}")
+
+
+def _dedupe_file_storage_if_needed() -> None:
+    if config.SAVE_DATA_OPTION not in ("csv", "json", "jsonl"):
+        return
+
+    try:
+        from tools.store_dedupe import dedupe_current_crawl_files
+
+        crawler_type = crawler_type_var.get() or config.CRAWLER_TYPE
+        results = dedupe_current_crawl_files(
+            platform=config.PLATFORM,
+            crawler_type=crawler_type,
+            save_data_option=config.SAVE_DATA_OPTION,
+        )
+        removed_count = sum(result.removed_count for result in results)
+        if removed_count:
+            print(f"[Main] Deduped file storage records, removed duplicates: {removed_count}")
+    except Exception as e:
+        print(f"[Main] Error deduping file storage data: {e}")
 
 
 async def _generate_wordcloud_if_needed() -> None:
@@ -109,6 +133,7 @@ async def main() -> None:
     crawler = CrawlerFactory.create_crawler(platform=config.PLATFORM)
     await crawler.start()
 
+    _dedupe_file_storage_if_needed()
     _flush_excel_if_needed()
 
     # Generate wordcloud after crawling is complete

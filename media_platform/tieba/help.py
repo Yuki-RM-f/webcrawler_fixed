@@ -64,9 +64,23 @@ class TieBaExtractor:
         return note_id_match.group(1) if note_id_match else ""
 
     @staticmethod
-    def _text_to_int(text: str) -> int:
-        match = re.search(r"\d+", text or "")
-        return int(match.group(0)) if match else 0
+    def _text_to_int(text: Any) -> int:
+        if text is None:
+            return 0
+        if isinstance(text, int):
+            return text
+        if isinstance(text, float):
+            return int(text)
+
+        normalized_text = str(text).replace(",", "").strip()
+        match = re.search(r"(\d+(?:\.\d+)?)\s*([wW万]?)", normalized_text)
+        if not match:
+            return 0
+
+        count = float(match.group(1))
+        if match.group(2) in {"w", "W", "万"}:
+            count *= 10000
+        return int(count)
 
     @staticmethod
     def _ensure_tieba_suffix(tieba_name: str) -> str:
@@ -93,6 +107,56 @@ class TieBaExtractor:
             if text:
                 text_list.append(str(text))
         return cls._normalize_text("".join(text_list))
+
+    @classmethod
+    def _extract_api_content_images(cls, content: Any) -> List[str]:
+        if isinstance(content, dict):
+            content = [content]
+        if not isinstance(content, list):
+            return []
+
+        image_urls: List[str] = []
+        seen = set()
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            for key in ("src", "origin_src", "img_url", "image_url", "url", "bpic"):
+                for raw_url in cls._coerce_image_urls(item.get(key)):
+                    image_url = cls._absolute_url(raw_url)
+                    if image_url and image_url not in seen:
+                        seen.add(image_url)
+                        image_urls.append(image_url)
+        return image_urls
+
+    @staticmethod
+    def _coerce_image_urls(value: Any) -> List[str]:
+        if value in (None, "", []):
+            return []
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list):
+            result: List[str] = []
+            for item in value:
+                result.extend(TieBaExtractor._coerce_image_urls(item))
+            return result
+        if isinstance(value, dict):
+            result: List[str] = []
+            for key in ("src", "origin_src", "img_url", "image_url", "url", "bpic"):
+                result.extend(TieBaExtractor._coerce_image_urls(value.get(key)))
+            return result
+        return []
+
+    @classmethod
+    def _extract_html_content_images(cls, selector: Selector) -> List[str]:
+        image_urls: List[str] = []
+        seen = set()
+        for image_selector in selector.xpath(".//img"):
+            for raw_url in image_selector.xpath("./@data-original | ./@bpic | ./@src").getall():
+                image_url = cls._absolute_url(raw_url)
+                if image_url and image_url not in seen:
+                    seen.add(image_url)
+                    image_urls.append(image_url)
+        return image_urls
 
     @staticmethod
     def _api_user_map(api_data: Dict) -> Dict[str, Dict]:
@@ -148,7 +212,7 @@ class TieBaExtractor:
                 user_avatar=user.get("portrait") or user.get("portraith") or "",
                 tieba_name=tieba_name,
                 tieba_link=self._tieba_link_from_name(tieba_name),
-                total_replay_num=item.get("post_num") or 0,
+                total_replay_num=self._text_to_int(item.get("post_num")),
             )
             result.append(tieba_note)
         return result
@@ -165,14 +229,15 @@ class TieBaExtractor:
         author = user_map.get(str(first_floor.get("author_id"))) or {}
         note_id = str(thread.get("id") or thread.get("tid") or first_floor.get("tid") or "")
         tieba_name = self._ensure_tieba_suffix(forum.get("name") or "")
+        detail_content = (
+            first_floor.get("content")
+            or thread.get("origin_thread_info", {}).get("abstract")
+            or thread.get("origin_thread_info", {}).get("content")
+        )
         note = TiebaNote(
             note_id=note_id,
             title=self._clean_title(thread.get("title") or first_floor.get("title") or "", tieba_name),
-            desc=self._extract_api_content_text(
-                first_floor.get("content")
-                or thread.get("origin_thread_info", {}).get("abstract")
-                or thread.get("origin_thread_info", {}).get("content")
-            ),
+            desc=self._extract_api_content_text(detail_content),
             note_url=f"{const.TIEBA_URL}/p/{note_id}",
             publish_time=utils.get_time_str_from_unix_time(
                 first_floor.get("time") or thread.get("create_time") or 0
@@ -185,6 +250,7 @@ class TieBaExtractor:
             total_replay_num=thread.get("reply_num") or 0,
             total_replay_page=page.get("total_page") or 0,
             ip_location=author.get("ip_address") or "",
+            image_list=",".join(self._extract_api_content_images(detail_content)),
         )
         return note
 
@@ -205,10 +271,11 @@ class TieBaExtractor:
             if not comment_id:
                 continue
             user = user_map.get(str(item.get("author_id"))) or {}
+            comment_content = item.get("content")
             comment = TiebaComment(
                 comment_id=comment_id,
                 sub_comment_count=item.get("sub_post_number") or 0,
-                content=self._extract_api_content_text(item.get("content")),
+                content=self._extract_api_content_text(comment_content),
                 note_url=note_detail.note_url,
                 user_link=self._api_user_link(user),
                 user_nickname=user.get("name_show") or user.get("name") or "",
@@ -219,6 +286,7 @@ class TieBaExtractor:
                 ip_location=user.get("ip_address") or "",
                 publish_time=utils.get_time_str_from_unix_time(item.get("time") or 0),
                 note_id=note_detail.note_id,
+                pictures=",".join(self._extract_api_content_images(comment_content)),
             )
             result.append(comment)
         return result
@@ -569,6 +637,11 @@ class TieBaExtractor:
                 thread_num_infos[1].xpath("./text()").get(default="0").strip()
                 if len(thread_num_infos) > 1 else 0
             ),
+            image_list=",".join(
+                self._extract_html_content_images(
+                    first_floor_selector.xpath(f".//div[{self._class_contains('d_post_content')}]")
+                )
+            ),
         )
         note.title = self._clean_title(note.title, note.tieba_name)
         return note
@@ -610,6 +683,11 @@ class TieBaExtractor:
             content_html = comment_content_value.get("content") or comment_selector.xpath(
                 f".//div[{self._class_contains('d_post_content')}]"
             ).get(default="")
+            pictures = self._extract_html_content_images(
+                comment_selector.xpath(f".//div[{self._class_contains('d_post_content')}]")
+            )
+            if not pictures and content_html:
+                pictures = self._extract_html_content_images(Selector(text=content_html))
             user_nickname = (
                 self._selector_text(comment_selector, f".//a[{self._class_contains('p_author_name')}][1]")
                 or comment_field_value.get("author", {}).get("user_nickname")
@@ -632,6 +710,7 @@ class TieBaExtractor:
                 ip_location=ip_location,
                 publish_time=publish_time,
                 note_id=note_id,
+                pictures=",".join(pictures),
             )
             result.append(tieba_comment)
         return result

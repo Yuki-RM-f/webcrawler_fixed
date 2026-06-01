@@ -41,6 +41,7 @@ class TiebaNote(BaseModel):
     total_replay_num: int = Field(default=0, description="Total reply count")
     total_replay_page: int = Field(default=0, description="Total reply pages")
     ip_location: Optional[str] = Field(default="", description="IP location")
+    image_list: str = Field(default="", description="Post image URLs")
     source_keyword: str = Field(default="", description="Source keyword")
 
 
@@ -63,6 +64,7 @@ class TiebaComment(BaseModel):
     tieba_id: str = Field(..., description="Tieba ID")
     tieba_name: str = Field(..., description="Tieba name")
     tieba_link: str = Field(..., description="Tieba link")
+    pictures: str = Field(default="", description="Comment image URLs")
 
 
 class TiebaCreator(BaseModel):

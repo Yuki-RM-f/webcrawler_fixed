@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from .routers import crawler_router, data_router, websocket_router
+from .routers import black_gray_intel_router, crawler_router, data_router, websocket_router
 
 app = FastAPI(
     title="MediaCrawler WebUI API",
@@ -59,6 +59,7 @@ app.add_middleware(
 app.include_router(crawler_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
+app.include_router(black_gray_intel_router, prefix="/api")
 
 
 @app.get("/")
@@ -135,12 +136,14 @@ async def get_platforms():
     return {
         "platforms": [
             {"value": "xhs", "label": "Xiaohongshu", "icon": "book-open"},
+            {"value": "x", "label": "X", "icon": "message-circle"},
             {"value": "dy", "label": "Douyin", "icon": "music"},
             {"value": "ks", "label": "Kuaishou", "icon": "video"},
             {"value": "bili", "label": "Bilibili", "icon": "tv"},
             {"value": "wb", "label": "Weibo", "icon": "message-circle"},
             {"value": "tieba", "label": "Baidu Tieba", "icon": "messages-square"},
             {"value": "zhihu", "label": "Zhihu", "icon": "help-circle"},
+            {"value": "goofish", "label": "Goofish", "icon": "shopping-bag"},
         ]
     }
 

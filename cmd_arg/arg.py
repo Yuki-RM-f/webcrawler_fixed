@@ -22,10 +22,12 @@ from __future__ import annotations
 
 
 import sys
+import json
 import re
 from enum import Enum
 from types import SimpleNamespace
 from typing import Iterable, Optional, Sequence, Type, TypeVar
+from urllib.parse import parse_qs, unquote, urlparse
 
 import typer
 from typing_extensions import Annotated
@@ -41,12 +43,14 @@ class PlatformEnum(str, Enum):
     """Supported media platform enumeration"""
 
     XHS = "xhs"
+    X = "x"
     DOUYIN = "dy"
     KUAISHOU = "ks"
     BILIBILI = "bili"
     WEIBO = "wb"
     TIEBA = "tieba"
     ZHIHU = "zhihu"
+    GOOFISH = "goofish"
 
 
 class LoginTypeEnum(str, Enum):
@@ -136,6 +140,68 @@ def _inject_init_db_default(args: Sequence[str]) -> list[str]:
     return normalized
 
 
+def _has_cli_option(args: Sequence[str], option_name: str) -> bool:
+    return any(arg == option_name or arg.startswith(f"{option_name}=") for arg in args)
+
+
+def _keyword_damage_signature(value: str) -> str:
+    return "".join("?" if not char.isascii() else char for char in value)
+
+
+def _looks_like_question_mark_damage(value: str) -> bool:
+    return (
+        re.search(r"\?{2,}", value) is not None
+        and not any(not char.isascii() for char in value)
+    )
+
+
+def _normalize_keywords(value: str, fallback_keywords: str) -> str:
+    value = unquote(value)
+    if not _looks_like_question_mark_damage(value):
+        return value
+
+    raw_keywords = [keyword.strip() for keyword in value.split(",")]
+    fallback_keyword_list = [
+        keyword.strip() for keyword in fallback_keywords.split(",") if keyword.strip()
+    ]
+    if len(raw_keywords) == len(fallback_keyword_list):
+        positionally_recovered_keywords: list[str] = []
+        can_recover_positionally = False
+        for raw_keyword, fallback_keyword in zip(raw_keywords, fallback_keyword_list):
+            if _looks_like_question_mark_damage(raw_keyword):
+                if raw_keyword != _keyword_damage_signature(fallback_keyword):
+                    break
+                positionally_recovered_keywords.append(fallback_keyword)
+                can_recover_positionally = True
+            else:
+                positionally_recovered_keywords.append(raw_keyword)
+        else:
+            if can_recover_positionally:
+                return ",".join(positionally_recovered_keywords)
+
+    fallback_by_signature: dict[str, set[str]] = {}
+    for fallback_keyword in fallback_keyword_list:
+        if not fallback_keyword or not any(not char.isascii() for char in fallback_keyword):
+            continue
+        signature = _keyword_damage_signature(fallback_keyword)
+        fallback_by_signature.setdefault(signature, set()).add(fallback_keyword)
+
+    normalized_keywords: list[str] = []
+    for stripped_keyword in raw_keywords:
+        candidates = fallback_by_signature.get(stripped_keyword, set())
+        if _looks_like_question_mark_damage(stripped_keyword):
+            if len(candidates) == 1:
+                normalized_keywords.append(next(iter(candidates)))
+                continue
+            raise typer.BadParameter(
+                "Chinese keyword characters were replaced by '?'. "
+                "Use config/base_config.py or pass UTF-8/percent-encoded --keywords."
+            )
+        normalized_keywords.append(stripped_keyword)
+
+    return ",".join(normalized_keywords)
+
+
 def _normalize_tieba_note_id(value: str) -> str:
     """Accept a raw Tieba thread id or a /p/<id> URL."""
     value = value.strip()
@@ -151,6 +217,39 @@ def _normalize_tieba_creator_url(value: str) -> str:
     return f"https://tieba.baidu.com/home/main?id={value}"
 
 
+def _normalize_goofish_item_id(value: str) -> str:
+    """Accept a Goofish item id or an /item?id=<id> URL."""
+    value = value.strip()
+    if not value.startswith(("http://", "https://")):
+        return value
+    query = parse_qs(urlparse(value).query)
+    return (query.get("id") or [""])[0] or value.rstrip("/").split("/")[-1]
+
+
+def _normalize_goofish_creator_id(value: str) -> str:
+    """Accept a seller user id or a sharexy personal URL carrying bfp.userId."""
+    value = value.strip()
+    if not value.startswith(("http://", "https://")):
+        return value
+
+    query = parse_qs(urlparse(value).query)
+    for key in ("userId", "user_id", "sellerId"):
+        if query.get(key):
+            return query[key][0]
+
+    bfp = query.get("bfp", [""])[0]
+    if bfp:
+        try:
+            data = json.loads(unquote(bfp))
+        except json.JSONDecodeError:
+            data = {}
+        for key in ("userId", "user_id", "sellerId"):
+            if data.get(key):
+                return str(data[key])
+
+    return value.rstrip("/").split("/")[-1]
+
+
 async def parse_cmd(argv: Optional[Sequence[str]] = None):
     """Parse command line arguments using Typer."""
 
@@ -162,7 +261,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             PlatformEnum,
             typer.Option(
                 "--platform",
-                help="Media platform selection (xhs=XiaoHongShu | dy=Douyin | ks=Kuaishou | bili=Bilibili | wb=Weibo | tieba=Baidu Tieba | zhihu=Zhihu)",
+                help="Media platform selection (xhs=XiaoHongShu | x=X | dy=Douyin | ks=Kuaishou | bili=Bilibili | wb=Weibo | tieba=Baidu Tieba | zhihu=Zhihu | goofish=Goofish)",
                 rich_help_panel="Basic Configuration",
             ),
         ] = _coerce_enum(PlatformEnum, config.PLATFORM, PlatformEnum.XHS),
@@ -320,7 +419,12 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         """MediaCrawler 命令行入口"""
 
         enable_comment = _to_bool(get_comment)
+        if platform == PlatformEnum.X and not _has_cli_option(cli_args, "--get_comment"):
+            enable_comment = False
         enable_sub_comment = _to_bool(get_sub_comment)
+        if platform == PlatformEnum.GOOFISH:
+            enable_comment = False
+            enable_sub_comment = False
         enable_headless = _to_bool(headless)
         enable_ip_proxy_value = _to_bool(enable_ip_proxy)
         init_db_value = init_db.value if init_db else None
@@ -334,7 +438,11 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         config.LOGIN_TYPE = lt.value
         config.CRAWLER_TYPE = crawler_type.value
         config.START_PAGE = start
-        config.KEYWORDS = keywords
+        config.KEYWORDS = (
+            _normalize_keywords(keywords, config.KEYWORDS)
+            if _has_cli_option(cli_args, "--keywords")
+            else keywords
+        )
         config.ENABLE_GET_COMMENTS = enable_comment
         config.ENABLE_GET_SUB_COMMENTS = enable_sub_comment
         config.HEADLESS = enable_headless
@@ -364,6 +472,10 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 config.TIEBA_SPECIFIED_ID_LIST = [
                     _normalize_tieba_note_id(item) for item in specified_id_list
                 ]
+            elif platform == PlatformEnum.GOOFISH:
+                config.GOOFISH_SPECIFIED_ID_LIST = [
+                    _normalize_goofish_item_id(item) for item in specified_id_list
+                ]
 
         if creator_id_list:
             if platform == PlatformEnum.XHS:
@@ -379,6 +491,10 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             elif platform == PlatformEnum.TIEBA:
                 config.TIEBA_CREATOR_URL_LIST = [
                     _normalize_tieba_creator_url(item) for item in creator_id_list
+                ]
+            elif platform == PlatformEnum.GOOFISH:
+                config.GOOFISH_CREATOR_ID_LIST = [
+                    _normalize_goofish_creator_id(item) for item in creator_id_list
                 ]
 
         return SimpleNamespace(

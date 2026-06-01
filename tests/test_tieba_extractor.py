@@ -98,6 +98,34 @@ def test_extract_search_note_list_from_current_pc_api():
     assert notes[0].publish_time
 
 
+def test_extract_search_note_list_from_api_parses_w_reply_count():
+    api_data = {
+        "no": 0,
+        "error": "success",
+        "data": {
+            "card_list": [
+                {
+                    "cardInfo": "thread",
+                    "cardStyle": "thread",
+                    "data": {
+                        "tid": "10750900000",
+                        "title": "title",
+                        "content": "content",
+                        "time": 1773552643,
+                        "user": {"show_nickname": "user"},
+                        "post_num": "2W",
+                        "forum_name": "forum",
+                    },
+                },
+            ],
+        },
+    }
+
+    notes = TieBaExtractor().extract_search_note_list_from_api(api_data)
+
+    assert notes[0].total_replay_num == 20000
+
+
 def test_extract_note_detail_and_comments_from_current_pc_api():
     api_data = {
         "error_code": 0,
@@ -158,6 +186,44 @@ def test_extract_note_detail_and_comments_from_current_pc_api():
     assert comments[0].user_nickname == "期胡希3"
     assert comments[0].sub_comment_count == 4
     assert comments[0].ip_location == "河北"
+
+
+def test_extract_note_detail_and_comments_from_current_pc_api_keeps_image_urls():
+    api_data = {
+        "error_code": 0,
+        "thread": {"id": 10451142633, "title": "title"},
+        "forum": {"id": 1627732, "name": "dota2"},
+        "first_floor": {
+            "id": 153154064746,
+            "author_id": 4089186644,
+            "content": [
+                {"type": 0, "text": "text"},
+                {"type": 3, "src": "https://img.example/note-src.jpg"},
+                {"type": 3, "origin_src": "https://img.example/note-origin.jpg"},
+            ],
+        },
+        "post_list": [
+            {
+                "id": 153154097267,
+                "author_id": 6614897968,
+                "content": [
+                    {"type": 0, "text": "comment"},
+                    {"type": 3, "img_url": "https://img.example/comment.jpg"},
+                ],
+            }
+        ],
+        "user_list": [
+            {"id": 4089186644, "name_show": "author"},
+            {"id": 6614897968, "name_show": "commenter"},
+        ],
+    }
+
+    extractor = TieBaExtractor()
+    note = extractor.extract_note_detail_from_api(api_data)
+    comments = extractor.extract_tieba_note_parent_comments_from_api(api_data, note)
+
+    assert note.image_list == "https://img.example/note-src.jpg,https://img.example/note-origin.jpg"
+    assert comments[0].pictures == "https://img.example/comment.jpg"
 
 
 def test_extract_creator_info_and_threads_from_current_pc_api():
@@ -242,6 +308,34 @@ def test_extract_note_detail_from_post_page():
     assert note.ip_location == "广东"
 
 
+def test_extract_note_detail_from_post_page_keeps_content_image_urls():
+    html_content = """
+    <html>
+      <head>
+        <title>title</title>
+        <meta name="description" content="desc">
+      </head>
+      <body>
+        <a id="lzonly_cntn" href="/p/123456?see_lz=1"></a>
+        <div id="thread_theme_5">
+          <li class="l_reply_num"><span class="red">1</span></li>
+          <li class="l_reply_num"><span class="red">1</span></li>
+        </div>
+        <div class="l_post j_l_post" data-field='{"author":{"user_name":"author"}}'>
+          <a class="p_author_name" href="/home/main?id=tb.u1">author</a>
+          <div class="d_post_content">
+            text<img class="BDE_Image" src="https://img.example/html-note.jpg">
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+    note = TieBaExtractor().extract_note_detail(html_content)
+
+    assert note.image_list == "https://img.example/html-note.jpg"
+
+
 def test_extract_parent_comments_from_post_page():
     comments = TieBaExtractor().extract_tieba_note_parment_comments(
         read_fixture("note_comments.html"),
@@ -254,6 +348,25 @@ def test_extract_parent_comments_from_post_page():
     assert comments[0].user_nickname == "heinzfrentzen"
     assert comments[0].tieba_name == "网球风云吧"
     assert comments[0].ip_location == "福建"
+
+
+def test_extract_parent_comments_from_post_page_keeps_content_image_urls():
+    html_content = """
+    <html>
+      <body>
+        <div class="l_post j_l_post" data-pid="c1" data-field='{"content":{"post_id":"c1","forum_id":"f1","content":"text<img src=\\"https://img.example/html-comment.jpg\\">"},"author":{"user_name":"author"}}'>
+          <a class="p_author_name" href="/home/main?id=tb.u1">author</a>
+          <a class="p_author_face"><img src="https://img.example/avatar.jpg"></a>
+          <div class="post-tail-wrap"></div>
+          <div class="d_post_content">text<img src="https://img.example/html-comment.jpg"></div>
+        </div>
+      </body>
+    </html>
+    """
+
+    comments = TieBaExtractor().extract_tieba_note_parment_comments(html_content, "123456")
+
+    assert comments[0].pictures == "https://img.example/html-comment.jpg"
 
 
 def test_extract_sub_comments_with_class_token_matching():

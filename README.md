@@ -31,7 +31,7 @@
 
 ## 📖 项目简介
 
-一个功能强大的**多平台自媒体数据采集工具**，支持小红书、抖音、快手、B站、微博、贴吧、知乎等主流平台的公开信息抓取。
+一个功能强大的**多平台自媒体数据采集工具**，支持小红书、抖音、快手、B站、微博、贴吧、知乎、闲鱼等主流平台的公开信息抓取。
 
 ### 🔧 技术原理
 
@@ -50,6 +50,7 @@
 | 微博   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
 | 贴吧   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
 | 知乎   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
+| 闲鱼   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
 
 
 
@@ -146,6 +147,9 @@ uv run main.py --platform xhs --lt qrcode --type search
 # 从配置文件中读取指定的帖子ID列表获取指定帖子的信息与评论信息
 uv run main.py --platform xhs --lt qrcode --type detail
 
+# 闲鱼平台建议使用默认 CDP 模式连接真实 Chrome 浏览器
+uv run main.py --platform goofish --lt qrcode --type search --keywords "手机,显卡"
+
 # 打开对应APP扫二维码登录
 
 # 其他平台爬虫使用示例，执行下面的命令查看
@@ -174,6 +178,19 @@ uv run python -m api.main
 - 可视化配置爬虫参数（平台、登录方式、爬取类型等）
 - 实时查看爬虫运行状态和日志
 - 数据预览和导出
+
+#### 黑灰产情报 Agent 标准化导出
+
+启动 API 服务后，可通过 `GET /api/black-gray-intel/records` 把已落盘的抖音、贴吧、小红书搜索内容与评论转换为统一情报格式：
+
+```shell
+uv run uvicorn api.main:app --host 0.0.0.0 --port 18080
+curl "http://127.0.0.1:18080/api/black-gray-intel/records?platform=dy&kind=all&date=latest&limit=500"
+```
+
+支持参数：`platform=dy|tieba|xhs`、`kind=contents|comments|all`、`date=latest|YYYY-MM-DD`、`limit` 和 `offset`。该接口只读取 `data/{platform}/jsonl/search_contents_*.jsonl` / `search_comments_*.jsonl`，不会启动新的爬虫任务。
+
+图片 OCR 由黑灰产情报平台在数据处理阶段负责，爬虫侧不做图片文字识别。源图片 URL 会保留在接口返回的 `media_files[].file_url` 中，供平台后续处理。
 
 #### 界面预览
 

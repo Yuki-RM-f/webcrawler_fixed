@@ -24,12 +24,14 @@ from pydantic import BaseModel
 class PlatformEnum(str, Enum):
     """Supported media platforms"""
     XHS = "xhs"
+    X = "x"
     DOUYIN = "dy"
     KUAISHOU = "ks"
     BILIBILI = "bili"
     WEIBO = "wb"
     TIEBA = "tieba"
     ZHIHU = "zhihu"
+    GOOFISH = "goofish"
 
 
 class LoginTypeEnum(str, Enum):

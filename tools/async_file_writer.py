@@ -55,9 +55,10 @@ class AsyncFileWriter:
 
     async def write_to_jsonl(self, item: Dict, item_type: str):
         file_path = self._get_file_path('jsonl', item_type)
+        record = json.dumps(item, ensure_ascii=False).replace("\r", "\\r").replace("\n", "\\n")
         async with self.lock:
             async with aiofiles.open(file_path, 'a', encoding='utf-8') as f:
-                await f.write(json.dumps(item, ensure_ascii=False) + '\n')
+                await f.write(record + '\n')
 
     async def write_single_item_to_json(self, item: Dict, item_type: str):
         file_path = self._get_file_path('json', item_type)

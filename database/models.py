@@ -382,6 +382,57 @@ class TiebaCreator(Base):
     fans = Column(Text, comment='粉丝数')
     registration_duration = Column(Text, comment='注册时长')
 
+class GoofishItem(Base):
+    __tablename__ = 'goofish_item'
+    id = Column(Integer, primary_key=True, comment='主键ID')
+    item_id = Column(String(255), index=True, comment='商品ID')
+    item_url = Column(Text, comment='商品URL')
+    category_id = Column(String(255), default='', comment='类目ID')
+    title = Column(Text, comment='商品标题')
+    desc = Column(Text, comment='商品描述')
+    price = Column(Text, comment='价格')
+    location = Column(Text, default='', comment='位置')
+    publish_time = Column(String(255), index=True, comment='发布时间')
+    seller_id = Column(String(255), index=True, comment='卖家ID')
+    seller_nickname = Column(Text, comment='卖家昵称')
+    seller_avatar = Column(Text, comment='卖家头像')
+    seller_homepage_url = Column(Text, comment='卖家主页')
+    image_list = Column(Text, comment='图片列表')
+    source_keyword = Column(Text, default='', comment='来源关键词')
+    add_ts = Column(BigInteger, comment='添加时间戳')
+    last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
+
+class GoofishComment(Base):
+    __tablename__ = 'goofish_comment'
+    id = Column(Integer, primary_key=True, comment='主键ID')
+    comment_id = Column(String(255), index=True, comment='评论ID')
+    item_id = Column(String(255), index=True, comment='商品ID')
+    parent_comment_id = Column(String(255), default='', comment='父评论ID')
+    content = Column(Text, comment='评论内容')
+    publish_time = Column(String(255), index=True, comment='发布时间')
+    user_id = Column(String(255), comment='用户ID')
+    nickname = Column(Text, comment='用户昵称')
+    avatar = Column(Text, comment='用户头像')
+    pictures = Column(Text, default='', comment='图片')
+    like_count = Column(Text, default='0', comment='点赞数')
+    add_ts = Column(BigInteger, comment='添加时间戳')
+    last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
+
+class GoofishCreator(Base):
+    __tablename__ = 'goofish_creator'
+    id = Column(Integer, primary_key=True, comment='主键ID')
+    user_id = Column(String(255), index=True, comment='卖家ID')
+    nickname = Column(Text, comment='卖家昵称')
+    avatar = Column(Text, comment='卖家头像')
+    seller_homepage_url = Column(Text, comment='卖家主页')
+    desc = Column(Text, comment='描述')
+    location = Column(Text, default='', comment='位置')
+    fans_count = Column(Text, default='', comment='粉丝数')
+    follows_count = Column(Text, default='', comment='关注数')
+    credit_level = Column(Text, default='', comment='信用等级')
+    add_ts = Column(BigInteger, comment='添加时间戳')
+    last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
+
 class ZhihuContent(Base):
     __tablename__ = 'zhihu_content'
     id = Column(Integer, primary_key=True, comment='主键ID')
