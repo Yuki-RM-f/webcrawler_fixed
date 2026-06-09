@@ -42,7 +42,7 @@ async def test_jsonl_writer_escapes_raw_line_breaks_from_serialized_record(tmp_p
     )
     monkeypatch.setattr(
         "tools.async_file_writer.json.dumps",
-        lambda item, ensure_ascii=False: '{"content":"first\r\nsecond"}',
+        lambda item, ensure_ascii=False: '{"content":"first\r\nsecond\u0085third"}',
     )
 
     writer = AsyncFileWriter(platform="x", crawler_type="search")
@@ -54,4 +54,4 @@ async def test_jsonl_writer_escapes_raw_line_breaks_from_serialized_record(tmp_p
 
     assert "\r" not in record
     assert "\n" not in record
-    assert record == '{"content":"first\\r\\nsecond"}'
+    assert record == '{"content":"first\\nsecond\\nthird"}'
